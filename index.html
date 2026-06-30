@@ -1,0 +1,426 @@
+<!-- index.html — Mapa de Lotes-->
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mapa de Lotes - Tu Casita</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; }
+    #map { height: 100vh; width: 100%; }
+
+    /* Panel de información */
+    .info-panel {
+      position: absolute;
+      top: 10px; right: 10px;
+      z-index: 1000;
+      background: white;
+      padding: 16px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+      min-width: 200px;
+      max-width: 280px;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .info-panel h3 {
+      margin: 0 0 8px 0;
+      font-size: 16px;
+      color: #2D6A4F;
+      border-bottom: 2px solid #2D6A4F;
+      padding-bottom: 5px;
+    }
+    .info-panel p {
+      margin: 4px 0;
+      font-size: 12px;
+      color: #555;
+    }
+    .info-panel .total-lotes {
+      background: #f0f8f4;
+      padding: 8px;
+      border-radius: 5px;
+      margin: 8px 0;
+      text-align: center;
+      font-weight: bold;
+      font-size: 14px;
+      color: #2D6A4F;
+    }
+    
+    /* Estilos para diferentes estados */
+    .estado-disponible { color: #2D6A4F; font-weight: bold; }
+    .estado-vendido    { color: #E63946; font-weight: bold; }
+    .estado-reservado  { color: #F4A261; font-weight: bold; }
+    .estado-en-tramite { color: #4A90D9; font-weight: bold; }
+
+    /* Leyenda */
+    .legend {
+      position: absolute;
+      bottom: 30px; left: 30px;
+      z-index: 1000;
+      background: white;
+      padding: 12px 16px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin: 4px 0;
+      font-size: 12px;
+    }
+    .legend-color {
+      width: 20px;
+      height: 20px;
+      margin-right: 8px;
+      border-radius: 4px;
+      border: 1px solid #ccc;
+    }
+
+    .filter-control {
+      margin-bottom: 10px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #eee;
+    }
+    .filter-control label {
+      display: block;
+      font-size: 12px;
+      font-weight: bold;
+      color: #2D6A4F;
+      margin-bottom: 4px;
+    }
+    .filter-control select {
+      width: 100%;
+      padding: 6px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+  
+    @media (max-width: 768px) {
+      .info-panel {
+        top: 10px;
+        right: 10px;
+        left: 10px;
+        max-width: none;
+        max-height: 40vh;
+        font-size: 12px;
+      }
+      .legend {
+        bottom: 80px;
+        left: 10px;
+        padding: 8px 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Contenedor del mapa -->
+<div id="map"></div>
+
+<!-- Panel de información -->
+<div class="info-panel" id="infoPanel">
+  <h3>📊 Lotes Registrados</h3>
+  <div class="filter-control">
+    <label for="municipioSelect">Filtrar por municipio</label>
+    <select id="municipioSelect">
+      <option value="">Todos los municipios</option>
+    </select>
+  </div>
+  <div id="infoContent">
+    <p>Cargando datos...</p>
+  </div>
+</div>
+
+<!-- Leyenda -->
+<div class="legend" id="legend">
+  <div style="font-weight: bold; margin-bottom: 5px; font-size: 13px;">Estado de Lotes</div>
+  <div class="legend-item">
+    <div class="legend-color" style="background: #2D6A4F;"></div>
+    <span>Disponible</span>
+  </div>
+  <div class="legend-item">
+    <div class="legend-color" style="background: #F4A261;"></div>
+    <span>Reservado</span>
+  </div>
+  <div class="legend-item">
+    <div class="legend-color" style="background: #4A90D9;"></div>
+    <span>En Trámite</span>
+  </div>
+  <div class="legend-item">
+    <div class="legend-color" style="background: #E63946;"></div>
+    <span>Vendido</span>
+  </div>
+  <div class="legend-item">
+    <div class="legend-color" style="background: #999999;"></div>
+    <span>Sin Dato</span>
+  </div>
+</div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+  // 1. Crear el mapa - AJUSTA las coordenadas a tu zona
+  const map = L.map('map').setView([-17.7833, -63.1821], 13);
+
+  // 2. Agregar el mapa base de OpenStreetMap
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map);
+
+  
+  function normalizeEstado(estado) {
+    if (!estado) return '';
+    return estado.toString().trim().toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{Diacritic}/gu, '');
+  }
+
+  // 4. Función para definir el color según el estado del lote
+  function colorEstado(estado) {
+    const estadoNorm = normalizeEstado(estado);
+    if (estadoNorm === 'disponible' || estadoNorm === 'libre') return '#2D6A4F';
+    if (estadoNorm === 'reservado' || estadoNorm === 'apartado') return '#F4A261';
+    if (estadoNorm === 'en tramite' || estadoNorm === 'proceso' || estadoNorm === 'en tramite') return '#4A90D9';
+    if (estadoNorm === 'vendido' || estadoNorm === 'ocupado') return '#E63946';
+    return '#999999'; // sin dato
+  }
+
+  // 5. Función para obtener clase CSS según estado
+  function claseEstado(estado) {
+    const estadoNorm = normalizeEstado(estado);
+    if (estadoNorm === 'disponible' || estadoNorm === 'libre') return 'estado-disponible';
+    if (estadoNorm === 'reservado' || estadoNorm === 'apartado') return 'estado-reservado';
+    if (estadoNorm === 'en tramite' || estadoNorm === 'proceso') return 'estado-en-tramite';
+    if (estadoNorm === 'vendido' || estadoNorm === 'ocupado') return 'estado-vendido';
+    return '';
+  }
+
+  // 5. Contador de lotes para el panel
+  let totalLotes = 0;
+  let lotesPorEstado = {};
+  let lotesLayers = [];
+  let selectedMunicipio = '';
+
+  function obtenerEstilo(feature, municipioSeleccionado, municipioNombre) {
+    const estado = feature.properties.Estado || feature.properties.estado || 'Sin dato';
+    const coincideMunicipio = !municipioSeleccionado || municipioNombre === municipioSeleccionado;
+
+    return {
+      fillColor: colorEstado(estado),
+      fillOpacity: coincideMunicipio ? 0.75 : 0.12,
+      color: coincideMunicipio ? '#FFFFFF' : 'rgba(255,255,255,0.3)',
+      weight: coincideMunicipio ? 1.5 : 0.7,
+      opacity: coincideMunicipio ? 1 : 0.25
+    };
+  }
+
+  function aplicarFiltroMunicipio() {
+    const selectMunicipio = document.getElementById('municipioSelect');
+    selectedMunicipio = selectMunicipio ? selectMunicipio.value : '';
+
+    const capasVisibles = [];
+    lotesLayers.forEach(item => {
+      const coincideMunicipio = !selectedMunicipio || item.municipio === selectedMunicipio;
+      item.layer.setStyle(obtenerEstilo(item.feature, selectedMunicipio, item.municipio));
+      if (coincideMunicipio) {
+        capasVisibles.push(item.layer);
+      }
+    });
+
+    if (selectedMunicipio) {
+      const bounds = L.featureGroup(capasVisibles).getBounds();
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [50, 50] });
+      }
+    } else {
+      const bounds = L.featureGroup(lotesLayers.map(item => item.layer)).getBounds();
+      if (bounds.isValid()) {
+        map.fitBounds(bounds, { padding: [50, 50] });
+      }
+    }
+
+    actualizarPanel();
+  }
+
+  // 6. Cargar el GeoJSON con tus lotes
+  fetch('PFinal.geojson')
+    .then(r => {
+      if (!r.ok) {
+        throw new Error('No se pudo cargar el archivo PFinal.geojson');
+      }
+      return r.json();
+    })
+    .then(data => {
+      // Contar lotes y clasificar por estado
+      totalLotes = data.features.length;
+      
+      data.features.forEach(feature => {
+        const estado = feature.properties.Estado || feature.properties.estado || 'Sin dato';
+        const estadoKey = estado.toLowerCase();
+        lotesPorEstado[estadoKey] = (lotesPorEstado[estadoKey] || 0) + 1;
+      });
+
+      const selectMunicipio = document.getElementById('municipioSelect');
+      const municipios = [...new Set(data.features.map(feature => {
+        return feature.properties.Municipio || feature.properties.municipio || 'No especificado';
+      }))].filter(Boolean).sort();
+
+      municipios.forEach(municipio => {
+        const option = document.createElement('option');
+        option.value = municipio;
+        option.textContent = municipio;
+        selectMunicipio.appendChild(option);
+      });
+
+      // Crear capa de lotes
+      const lotesLayerGroup = L.layerGroup().addTo(map);
+
+      data.features.forEach(feature => {
+        const municipio = feature.properties.Municipio || feature.properties.municipio || 'No especificado';
+        const layer = L.geoJSON(feature, {
+          style: function(f) {
+            return obtenerEstilo(f, selectedMunicipio, municipio);
+          },
+          onEachFeature: function(f, currentLayer) {
+            const p = f.properties;
+            const id = p.ID_Lote || p.id_lote || p.id || 'N/A';
+            const duenho = p.Duenho || p.duenho || p.propietario || p.Propietario || p.owner || 'No especificado';
+            const estado = p.Estado || p.estado || p.status || 'Sin dato';
+            const area = p.Area_ha || p.area_ha || p.Area || p.area || p.AREA || 'N/A';
+            const precio = p.Precio || p.precio || 'N/A';
+            const municipioNombre = p.Municipio || p.municipio || 'No especificado';
+
+            let areaTexto = area;
+            if (typeof area === 'number') {
+              if (area >= 1) {
+                areaTexto = area.toFixed(2) + ' ha';
+              } else {
+                areaTexto = (area * 10000).toFixed(0) + ' m²';
+              }
+            }
+
+            const claseEst = claseEstado(estado);
+
+            currentLayer.bindPopup(`
+              <div style="min-width: 220px;">
+                <b style="font-size:16px; color:#2D6A4F;">Lote ${id}</b>
+                <hr style="margin:6px 0">
+                <b>Dueño:</b> ${duenho}<br>
+                <b>Estado:</b> <span class="${claseEst}">${estado}</span><br>
+                <b>Área (ha):</b> ${areaTexto}<br>
+                <b>Precio:</b> ${precio}<br>
+                <b>Municipio:</b> ${municipioNombre}<br>
+              </div>
+            `);
+
+            currentLayer.bindTooltip(`Lote ${id}`, {
+              permanent: false,
+              direction: 'top',
+              className: 'custom-tooltip'
+            });
+          }
+        });
+
+        layer.addTo(lotesLayerGroup);
+        lotesLayers.push({ layer, feature, municipio });
+      });
+
+      // Actualizar el panel de información
+      actualizarPanel();
+      selectMunicipio.addEventListener('change', aplicarFiltroMunicipio);
+      aplicarFiltroMunicipio();
+    })
+    .catch(error => {
+      console.error('Error cargando los datos:', error);
+      document.getElementById('infoContent').innerHTML = `
+        <p style="color: red;">⚠️ Error cargando los lotes</p>
+        <p style="font-size: 11px; color: #666;">Asegúrate de que el archivo PFinal.geojson esté en la misma carpeta</p>
+      `;
+    });
+
+  // 11. Función para actualizar el panel de información
+  function actualizarPanel() {
+    const infoContent = document.getElementById('infoContent');
+    
+    const lotesMostrados = selectedMunicipio
+      ? lotesLayers.filter(item => item.municipio === selectedMunicipio).length
+      : totalLotes;
+
+    let html = `
+      <div class="total-lotes">
+        Total Lotes: ${lotesMostrados}
+      </div>
+      <p style="font-size: 12px; margin: 6px 0 0 0; color: #2D6A4F;">
+        Municipio: <strong>${selectedMunicipio || 'Todos'}</strong>
+      </p>
+      <p style="font-size: 13px; font-weight: bold; margin-top: 10px;">Distribución por Estado:</p>
+    `;
+
+    const estadoLabels = {
+      'disponible': '🟢 Disponible',
+      'libre': '🟢 Libre',
+      'vendido': '🔴 Vendido',
+      'proceso': '🔵 En Proceso'
+    };
+
+    // Mostrar contador por estado
+    for (const [estado, count] of Object.entries(lotesPorEstado)) {
+      const label = estadoLabels[estado] || estado;
+      const emoji = estado.includes('disponible') || estado.includes('libre') ? '🟢' :
+                   estado.includes('vendido') ? '🔴' :
+                   estado.includes('reservado') || estado.includes('apartado') ? '🟡' :
+                   estado.includes('tramite') || estado.includes('proceso') ? '🔵' : '⚪';
+      html += `<p style="margin: 2px 0; font-size: 12px;">
+        ${emoji} ${label}: <strong>${count}</strong>
+      </p>`;
+    }
+
+    // Instrucciones de uso
+    html += `
+      <hr style="margin: 10px 0; border: none; border-top: 1px solid #eee;">
+      <p style="font-size: 11px; color: #888; margin-top: 5px;">
+        💡 Haz clic en cualquier lote para ver sus detalles
+      </p>
+    `;
+
+    infoContent.innerHTML = html;
+  }
+
+  // 12. Agregar control de escala
+  L.control.scale({ position: 'bottomright' }).addTo(map);
+
+  // 13. Mostrar coordenadas al mover el mouse
+  const mouseCoords = L.control({ position: 'bottomleft' });
+  mouseCoords.onAdd = function() {
+    const div = L.DomUtil.create('div', 'coords-info');
+    div.style.background = 'rgba(255,255,255,0.8)';
+    div.style.padding = '5px 10px';
+    div.style.borderRadius = '4px';
+    div.style.fontSize = '12px';
+    div.style.boxShadow = '0 1px 5px rgba(0,0,0,0.2)';
+    div.innerHTML = 'Mueve el mouse sobre el mapa';
+    return div;
+  };
+  mouseCoords.addTo(map);
+
+  map.on('mousemove', function(e) {
+    const coordsDiv = document.querySelector('.coords-info');
+    if (coordsDiv) {
+      const lat = e.latlng.lat.toFixed(6);
+      const lng = e.latlng.lng.toFixed(6);
+      coordsDiv.innerHTML = `📍 ${lat}, ${lng}`;
+    }
+  });
+
+  console.log('✅ Mapa de lotes cargado correctamente');
+</script>
+</body>
+</html>
